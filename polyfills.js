@@ -335,17 +335,23 @@
     if (e.keyCode === 40 || e.keyCode === 38) {
       e.preventDefault(); e.stopImmediatePropagation();
       if (e.type === 'keydown' && SN) SN.move(e.keyCode === 40 ? 'down' : 'up');
-    } else if (e.keyCode === 13) {
-      var inputs = [].slice.call(intro.querySelectorAll('input')).filter(function (i) { var r = i.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
-      var idx = inputs.indexOf(a);
-      if (idx > -1 && idx < inputs.length - 1) {
-        e.preventDefault(); e.stopImmediatePropagation();
-        // move only after the IME has committed its text (keyup + a short delay), otherwise the value is lost
-        if (e.type === 'keyup') { var next = inputs[idx + 1]; setTimeout(function () { next.focus(); }, 250); }
-      }
+    } else if (e.keyCode === 13 && e.type === 'keyup') {
+      // Don't touch keydown: cancelling Enter while the IME is composing discards the typed text.
+      var inputs = introInputs(intro), idx = inputs.indexOf(a);
+      if (idx > -1 && idx < inputs.length - 1) { var next = inputs[idx + 1]; setTimeout(function () { next.focus(); }, 250); }
     }
   }
-  ['keydown', 'keypress', 'keyup'].forEach(function (t) { window.addEventListener(t, introInputKey, true); });
+  function introInputs(intro) {
+    return [].slice.call(intro.querySelectorAll('input')).filter(function (i) { var r = i.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+  }
+  ['keydown', 'keyup'].forEach(function (t) { window.addEventListener(t, introInputKey, true); });
+  // Enter in a non-last field would submit the form: swallow that submit, keep the IME commit.
+  document.addEventListener('submit', function (e) {
+    var a = document.activeElement, intro = document.getElementById('intro');
+    if (!a || a.tagName !== 'INPUT' || !intro || !intro.contains(a)) return;
+    var inputs = introInputs(intro);
+    if (inputs.indexOf(a) > -1 && inputs.indexOf(a) < inputs.length - 1) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
 
   // Remote BACK on the login screen: the shell ignores it there, so act like the on-screen back button.
   window.__introBack = function (type) {
