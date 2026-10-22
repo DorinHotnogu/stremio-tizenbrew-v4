@@ -405,10 +405,102 @@
       if (e.keyCode !== 10009 || e.__synthetic) return;
       e.stopImmediatePropagation(); e.preventDefault();
       if (window.__introBack && window.__introBack(type)) return; // login screen: shell ignores back
+      if (window.__playerBack && window.__playerBack(type)) return; // player: back hides the control bar first
       var s = synth(type, 27); s.__synthetic = true;
       (e.target || document).dispatchEvent(s);
     }, true);
   });
+})();
+
+/* ---- Player: TV remote behaviour ----
+   controls hidden: LEFT/RIGHT seek (shell), OK play/pause, DOWN shows the control bar
+   controls shown:  LEFT/RIGHT move between controls, OK activates / opens a popup, UP or BACK hides */
+(function () {
+  'use strict';
+  var shown = false;
+  function synthKey(code) {
+    ['keydown', 'keyup'].forEach(function (type) {
+      var ev = document.createEvent('Event'); ev.initEvent(type, true, true);
+      ['keyCode', 'which'].forEach(function (p) { Object.defineProperty(ev, p, { get: function () { return code; } }); });
+      ev.__synthetic = true; document.dispatchEvent(ev);
+    });
+  }
+  function inPlayer() {
+    var p = document.getElementById('player');
+    return !!(p && /player/.test(location.hash) && p.getBoundingClientRect().width > 0);
+  }
+  function controlsEls() { return document.querySelectorAll('#controlbar .control, #controlbar .popup li, #controlbar .popup .button, #controlbar .popup .toggle, #controlbar .popup .player-setting'); }
+  function showControls() {
+    var SN = window.SpatialNavigation; if (!SN) return;
+    var h = document.querySelectorAll('#player .hidable');
+    for (var i = 0; i < h.length; i++) h[i].classList.remove('hidden');
+    var els = controlsEls();
+    for (var j = 0; j < els.length; j++) if (!els[j].hasAttribute('tabindex')) els[j].setAttribute('tabindex', '-1');
+    try { SN.remove('playerControls'); } catch (e) {}
+    SN.add({ id: 'playerControls', selector: '#controlbar [tabindex]', restrict: 'self-only', enterTo: 'last-focused' });
+    try { SN.enable('playerControls'); } catch (e) {}
+    shown = true;
+    setTimeout(function () { try { SN.focus('playerControls'); } catch (e) {} }, 50);
+  }
+  function hideControls() {
+    var SN = window.SpatialNavigation;
+    var act = document.querySelectorAll('#controlbar .control.active');
+    for (var k = 0; k < act.length; k++) act[k].classList.remove('active');
+    var h = document.querySelectorAll('#player .hidable');
+    for (var i = 0; i < h.length; i++) h[i].classList.add('hidden');
+    try { if (SN) { SN.disable('playerControls'); } } catch (e) {}
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    shown = false;
+  }
+  function stop(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+  function closest(el, sel) { while (el && el !== document) { if (el.matches ? el.matches(sel) : el.webkitMatchesSelector(sel)) return el; el = el.parentElement; } return null; }
+  window.__playerBack = function (type) {
+    if (!inPlayer() || !shown) return false;
+    if (type === 'keydown') hideControls();
+    return true;
+  };
+  window.addEventListener('keydown', function (e) {
+    if (e.__synthetic || !inPlayer()) { if (!inPlayer()) shown = false; return; }
+    var k = e.keyCode, SN = window.SpatialNavigation, a = document.activeElement;
+    if (!shown) {
+      if (k === 40) { stop(e); showControls(); }
+      else if (k === 13) { stop(e); synthKey(32); }           // OK -> play/pause (shell: space)
+      else if (k === 38) { stop(e); }                          // UP alone does nothing (was volume up)
+      return;                                                  // LEFT/RIGHT fall through: shell seeks
+    }
+    if (k === 38) { stop(e); hideControls(); return; }
+    if (k === 13) {
+      stop(e);
+      if (!a) return;
+      var ctl = closest(a, '#controlbar .control');
+      if (ctl && a === ctl && ctl.querySelector('.popup')) {       // control with a popup: open/close it
+        var open = ctl.classList.toggle('active');
+        if (open && SN) setTimeout(function () { var first = ctl.querySelector('.popup [tabindex]'); if (first) first.focus(); }, 60);
+      } else {
+        a.click();
+        var owner = closest(a, '#controlbar .control.active');     // picked something in a popup: close it, back to the control
+        if (owner && a !== owner) { owner.classList.remove('active'); owner.focus(); }
+      }
+      return;
+    }
+    if (k === 37 || k === 39 || k === 40) {
+      stop(e);
+      var isVol = a && (a.id === 'volumeControl' || closest(a, '#volumeControl'));
+      var isSeek = a && /progress/.test(a.id + ' ' + a.className);
+      if (isVol && (k === 37 || k === 39)) { synthKey(k === 39 ? 38 : 40); return; }   // volume -/+ via shell's up/down
+      if (isSeek && (k === 37 || k === 39)) { synthKey(k); return; }                    // seek via shell's left/right
+      if (SN) SN.move(k === 37 ? 'left' : k === 39 ? 'right' : 'down');
+    }
+  }, true);
+  window.addEventListener('keyup', function (e) {
+    if (e.__synthetic || !inPlayer()) return;
+    if (shown || e.keyCode === 13 || e.keyCode === 40 || e.keyCode === 38) stop(e);
+  }, true);
+  var st = document.createElement('style');
+  st.textContent = '#controlbar .control:focus{outline:none;background:rgba(255,255,255,.18);border-radius:.4rem}' +
+    '#controlbar .control:focus .icon{opacity:1}' +
+    '#controlbar .popup li:focus,#controlbar .popup .button:focus,#controlbar .popup .toggle:focus,#controlbar .popup .player-setting:focus{outline:none;background:rgba(255,255,255,.22)}';
+  (document.head || document.documentElement).appendChild(st);
 })();
 
 window.__pfLoaded = true;
