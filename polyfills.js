@@ -298,8 +298,10 @@
   // While it is visible, make them focusable, register a self-contained section and land the focus inside.
   var introActive = false;
   function introVisible() {
-    var m = document.getElementById('introModal');
-    return !!(m && m.offsetParent !== null && /visible/.test(m.className) && getComputedStyle(m).display !== 'none');
+    var m = document.getElementById('introModal') || document.getElementById('intro');
+    if (!m) return false;
+    var r = m.getBoundingClientRect(), s = getComputedStyle(m);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
   }
   function watchIntro() {
     var SN = window.SpatialNavigation;
