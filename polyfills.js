@@ -247,3 +247,5 @@
     });
   }
 })();
+
+window.__pfLoaded = true;
