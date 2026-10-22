@@ -340,7 +340,8 @@
       var idx = inputs.indexOf(a);
       if (idx > -1 && idx < inputs.length - 1) {
         e.preventDefault(); e.stopImmediatePropagation();
-        if (e.type === 'keydown') inputs[idx + 1].focus();
+        // move only after the IME has committed its text (keyup + a short delay), otherwise the value is lost
+        if (e.type === 'keyup') { var next = inputs[idx + 1]; setTimeout(function () { next.focus(); }, 250); }
       }
     }
   }
