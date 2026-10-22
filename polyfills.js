@@ -326,6 +326,26 @@
     setTimeout(watchIntro, 500);
   }
   watchIntro();
+  // Inside login inputs keymaster ignores keys (input filter): handle up/down ourselves, and make the
+  // TV keyboard's Done (Enter) jump to the next field instead of submitting a half-filled form.
+  function introInputKey(e) {
+    var a = document.activeElement, intro = document.getElementById('intro');
+    if (!a || a.tagName !== 'INPUT' || !intro || !intro.contains(a)) return;
+    var SN = window.SpatialNavigation;
+    if (e.keyCode === 40 || e.keyCode === 38) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.type === 'keydown' && SN) SN.move(e.keyCode === 40 ? 'down' : 'up');
+    } else if (e.keyCode === 13) {
+      var inputs = [].slice.call(intro.querySelectorAll('input')).filter(function (i) { var r = i.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      var idx = inputs.indexOf(a);
+      if (idx > -1 && idx < inputs.length - 1) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (e.type === 'keydown') inputs[idx + 1].focus();
+      }
+    }
+  }
+  ['keydown', 'keypress', 'keyup'].forEach(function (t) { window.addEventListener(t, introInputKey, true); });
+
   // Remote BACK on the login screen: the shell ignores it there, so act like the on-screen back button.
   window.__introBack = function (type) {
     if (!introVisible()) return false;
