@@ -248,4 +248,53 @@
   }
 })();
 
+/* ---- TV integration: viewport scale + Samsung RETURN key -> Escape ---- */
+(function () {
+  'use strict';
+  // The Tizen TV webview ignores <meta viewport> (always 1920x1080). Lay the app out at a smaller
+  // width and scale it up with a transform so the UI is bigger and fits exactly. Tune window.__tvWidth.
+  var tvWidth = window.__tvWidth || 1280;
+  function applyScale() {
+    var W = window.innerWidth || 1920, H = window.innerHeight || 1080, k = W / tvWidth;
+    var css = 'html{overflow:hidden!important;background:#0c0c0c}' +
+      'body{width:' + tvWidth + 'px!important;height:' + Math.round(H / k) + 'px!important;overflow:hidden!important;' +
+      'transform:scale(' + k + ')!important;-webkit-transform:scale(' + k + ')!important;transform-origin:0 0!important;-webkit-transform-origin:0 0!important;margin:0!important}';
+    var st = document.getElementById('__tv_scale') || document.createElement('style');
+    st.id = '__tv_scale'; st.textContent = css;
+    (document.head || document.documentElement).appendChild(st);
+  }
+  if (document.head) applyScale(); else document.addEventListener('DOMContentLoaded', applyScale);
+  window.addEventListener('resize', applyScale);
+
+  // Chromium 47 has no CSS custom properties: swap the shell stylesheet for a copy with var() pre-resolved.
+  var CSS_FIX = window.__cssFixUrl || 'http://192.168.100.212:8099/app/blob.es5.css';
+  function swapCss() {
+    var links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (var i = 0; i < links.length; i++) {
+      if (/blob\.css/.test(links[i].getAttribute('href') || '') && links[i].getAttribute('data-fixed') !== '1') {
+        links[i].setAttribute('data-fixed', '1');
+        links[i].href = CSS_FIX + '?t=' + Date.now();
+      }
+    }
+  }
+  if (document.readyState !== 'loading') swapCss(); else document.addEventListener('DOMContentLoaded', swapCss);
+
+  // Samsung remote RETURN (10009) is unknown to the web app; replay it as Escape (27) so the shell's "back" fires.
+  function synth(type, code) {
+    var ev = document.createEvent('Event');
+    ev.initEvent(type, true, true);
+    ['keyCode', 'which'].forEach(function (p) { Object.defineProperty(ev, p, { get: function () { return code; } }); });
+    Object.defineProperty(ev, 'key', { get: function () { return 'Escape'; } });
+    return ev;
+  }
+  ['keydown', 'keyup'].forEach(function (type) {
+    window.addEventListener(type, function (e) {
+      if (e.keyCode !== 10009 || e.__synthetic) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      var s = synth(type, 27); s.__synthetic = true;
+      (e.target || document).dispatchEvent(s);
+    }, true);
+  });
+})();
+
 window.__pfLoaded = true;
