@@ -93,6 +93,7 @@
   }
   var errors = 0;
   window.addEventListener('error', function (ev) {
+    if (!ev || !ev.message) return; // resource load errors (img/css) are not JS errors
     if (errors++ > 5) return;
     var e = ev.error;
     show('JS ERROR: ' + (ev.message || e) + '\n  at ' + (ev.filename || '?') + ':' + ev.lineno + ':' + ev.colno +
