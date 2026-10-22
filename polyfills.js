@@ -256,6 +256,7 @@
   var tvWidth = window.__tvWidth || 1280;
   function applyScale() {
     var W = window.innerWidth || 1920, H = window.innerHeight || 1080, k = W / tvWidth;
+    window.__scaleK = k;
     var css = 'html{overflow:hidden!important;background:#0c0c0c}' +
       'body{width:' + tvWidth + 'px!important;height:' + Math.round(H / k) + 'px!important;overflow:hidden!important;' +
       'transform:scale(' + k + ')!important;-webkit-transform:scale(' + k + ')!important;transform-origin:0 0!important;-webkit-transform-origin:0 0!important;margin:0!important}';
@@ -278,6 +279,49 @@
     }
   }
   if (document.readyState !== 'loading') swapCss(); else document.addEventListener('DOMContentLoaded', swapCss);
+
+  // The shell never registers the sidebar (#navbar) and top bar as spatial-navigation sections,
+  // so the remote can't reach Home/Discover/Library/Settings, Search or the user icon. Register them.
+  var navTries = 0;
+  function addNavSections() {
+    var SN = window.SpatialNavigation;
+    if (!SN || !document.querySelector('#navbar .tab')) { if (navTries++ < 200) return setTimeout(addNavSections, 250); return; }
+    try { SN.remove('navbar'); } catch (e) {}
+    try { SN.remove('topbar'); } catch (e) {}
+    SN.add({ id: 'navbar', selector: '#navbar .tab', straightOnly: false, enterTo: 'last-focused' });
+    SN.add({ id: 'topbar', selector: '#topbar [tabindex], #search-bar [tabindex], #global-search-field', straightOnly: false, enterTo: 'last-focused' });
+    try { SN.enable('navbar'); SN.enable('topbar'); } catch (e) {}
+  }
+  addNavSections();
+
+  // Chromium 47 scrolls a focused element flush to the edge (padding lost, row heading clipped).
+  // After the browser's own scroll, nudge scrollable ancestors so the element sits inside with a margin.
+  var MARGIN = 24;
+  function keepVisible(el) {
+    var p = el.parentElement;
+    while (p && p !== document.documentElement) {
+      var cs = getComputedStyle(p);
+      var scrollsX = /(auto|scroll)/.test(cs.overflowX) && p.scrollWidth > p.clientWidth + 1;
+      var scrollsY = /(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1;
+      if (scrollsX || scrollsY) {
+        var r = el.getBoundingClientRect(), c = p.getBoundingClientRect(), k = (window.__scaleK || 1);
+        if (scrollsX) {
+          if (r.left < c.left + MARGIN * k) p.scrollLeft -= (c.left + MARGIN * k - r.left) / k;
+          else if (r.right > c.right - MARGIN * k) p.scrollLeft += (r.right - (c.right - MARGIN * k)) / k;
+        }
+        if (scrollsY) {
+          if (r.top < c.top + MARGIN * k) p.scrollTop -= (c.top + MARGIN * k - r.top) / k;
+          else if (r.bottom > c.bottom - MARGIN * k) p.scrollTop += (r.bottom - (c.bottom - MARGIN * k)) / k;
+        }
+      }
+      p = p.parentElement;
+    }
+  }
+  document.addEventListener('focus', function (e) {
+    var el = e.target;
+    if (!el || !el.getBoundingClientRect) return;
+    requestAnimationFrame(function () { keepVisible(el); });
+  }, true);
 
   // Samsung remote RETURN (10009) is unknown to the web app; replay it as Escape (27) so the shell's "back" fires.
   function synth(type, code) {
