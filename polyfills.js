@@ -294,6 +294,46 @@
   }
   addNavSections();
 
+  // Login/intro screen: its inputs and buttons are mouse-only in the shell (no tabindex, no section).
+  // While it is visible, make them focusable, register a self-contained section and land the focus inside.
+  var introActive = false;
+  function introVisible() {
+    var m = document.getElementById('introModal');
+    return !!(m && m.offsetParent !== null && /visible/.test(m.className) && getComputedStyle(m).display !== 'none');
+  }
+  function watchIntro() {
+    var SN = window.SpatialNavigation;
+    if (SN) {
+      var vis = introVisible();
+      if (vis) {
+        var els = document.querySelectorAll('#intro input, #intro button, #intro .button, #intro .acc, #intro .accept, #intro a.accept-link, #intro .pres [ng-click]');
+        for (var i = 0; i < els.length; i++) if (!els[i].hasAttribute('tabindex')) els[i].setAttribute('tabindex', '-1');
+        if (!introActive) {
+          try { SN.remove('intro'); } catch (e) {}
+          SN.add({ id: 'intro', selector: '#intro [tabindex]', restrict: 'self-only', enterTo: 'last-focused' });
+          try { SN.enable('intro'); } catch (e) {}
+          introActive = true;
+        }
+        var a = document.activeElement;
+        if (!a || !document.getElementById('intro').contains(a)) { try { SN.focus('intro'); } catch (e) {} }
+      } else if (introActive) {
+        try { SN.disable('intro'); SN.remove('intro'); } catch (e) {}
+        introActive = false;
+      }
+    }
+    setTimeout(watchIntro, 500);
+  }
+  watchIntro();
+  // Remote BACK on the login screen: the shell ignores it there, so act like the on-screen back button.
+  window.__introBack = function (type) {
+    if (!introVisible()) return false;
+    if (type === 'keydown') {
+      var back = document.querySelector('#topbar .back') || document.querySelector('#topbar .logo');
+      if (back) back.click(); else history.back();
+    }
+    return true;
+  };
+
   // Chromium 47 scrolls a focused element flush to the edge (padding lost, row heading clipped).
   // After the browser's own scroll, nudge scrollable ancestors so the element sits inside with a margin.
   var MARGIN = 24;
@@ -335,6 +375,7 @@
     window.addEventListener(type, function (e) {
       if (e.keyCode !== 10009 || e.__synthetic) return;
       e.stopImmediatePropagation(); e.preventDefault();
+      if (window.__introBack && window.__introBack(type)) return; // login screen: shell ignores back
       var s = synth(type, 27); s.__synthetic = true;
       (e.target || document).dispatchEvent(s);
     }, true);
