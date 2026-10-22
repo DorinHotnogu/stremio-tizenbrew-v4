@@ -112,3 +112,138 @@
   function ready() { show('Stremio v4 + polyfills | ' + navigator.userAgent, false); }
   if (document.body) ready(); else document.addEventListener('DOMContentLoaded', ready);
 })();
+
+/* ---- Web API polyfills missing in Chromium 47 (Tizen 3.0) ---- */
+(function () {
+  'use strict';
+
+  // URLSearchParams (Chromium 49) + URL.prototype.searchParams (51)
+  if (typeof URLSearchParams === 'undefined') {
+    var enc = function (s) { return encodeURIComponent(s).replace(/%20/g, '+'); };
+    var dec = function (s) { return decodeURIComponent(String(s).replace(/\+/g, ' ')); };
+    var USP = function (init) {
+      this._l = [];
+      if (!init) return;
+      if (typeof init === 'string') {
+        var q = init.charAt(0) === '?' ? init.slice(1) : init;
+        if (q) q.split('&').forEach(function (p) {
+          var i = p.indexOf('='); if (i < 0) i = p.length;
+          this._l.push([dec(p.slice(0, i)), dec(p.slice(i + 1))]);
+        }, this);
+      } else if (init instanceof USP) { this._l = init._l.slice(); }
+      else if (Array.isArray(init)) { init.forEach(function (kv) { this._l.push([String(kv[0]), String(kv[1])]); }, this); }
+      else if (typeof init === 'object') { Object.keys(init).forEach(function (k) { this._l.push([k, String(init[k])]); }, this); }
+    };
+    USP.prototype = {
+      append: function (k, v) { this._l.push([String(k), String(v)]); },
+      'delete': function (k) { this._l = this._l.filter(function (kv) { return kv[0] !== k; }); },
+      get: function (k) { for (var i = 0; i < this._l.length; i++) if (this._l[i][0] === k) return this._l[i][1]; return null; },
+      getAll: function (k) { return this._l.filter(function (kv) { return kv[0] === k; }).map(function (kv) { return kv[1]; }); },
+      has: function (k) { return this.get(k) !== null; },
+      set: function (k, v) { var done = false; this._l = this._l.filter(function (kv) { if (kv[0] !== k) return true; if (done) return false; done = true; kv[1] = String(v); return true; }); if (!done) this._l.push([String(k), String(v)]); },
+      sort: function () { this._l.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; }); },
+      forEach: function (cb, thisArg) { this._l.forEach(function (kv) { cb.call(thisArg, kv[1], kv[0], this); }, this); },
+      keys: function () { return this._l.map(function (kv) { return kv[0]; })[Symbol.iterator](); },
+      values: function () { return this._l.map(function (kv) { return kv[1]; })[Symbol.iterator](); },
+      entries: function () { return this._l.map(function (kv) { return [kv[0], kv[1]]; })[Symbol.iterator](); },
+      toString: function () { return this._l.map(function (kv) { return enc(kv[0]) + '=' + enc(kv[1]); }).join('&'); }
+    };
+    USP.prototype[Symbol.iterator] = USP.prototype.entries;
+    window.URLSearchParams = USP;
+  }
+  if (typeof URL !== 'undefined' && !('searchParams' in URL.prototype)) {
+    Object.defineProperty(URL.prototype, 'searchParams', {
+      get: function () {
+        var self = this, sp = new URLSearchParams(this.search), orig = sp.toString();
+        // keep URL.search in sync after mutations
+        ['append', 'delete', 'set', 'sort'].forEach(function (m) {
+          var f = sp[m]; sp[m] = function () { var r = f.apply(sp, arguments); var s = sp.toString(); self.search = s ? '?' + s : ''; return r; };
+        });
+        return sp;
+      }
+    });
+  }
+
+  // AbortController / AbortSignal (Chromium 66) — minimal, fetch() ignores the signal but code using it won't crash
+  if (typeof AbortController === 'undefined') {
+    var Sig = function () { this.aborted = false; this.onabort = null; this._ls = []; };
+    Sig.prototype.addEventListener = function (t, f) { if (t === 'abort') this._ls.push(f); };
+    Sig.prototype.removeEventListener = function (t, f) { this._ls = this._ls.filter(function (x) { return x !== f; }); };
+    Sig.prototype.dispatchEvent = function (ev) { this._ls.forEach(function (f) { f(ev); }); if (this.onabort) this.onabort(ev); };
+    var AC = function () { this.signal = new Sig(); };
+    AC.prototype.abort = function () { if (this.signal.aborted) return; this.signal.aborted = true; this.signal.dispatchEvent({ type: 'abort', target: this.signal }); };
+    window.AbortSignal = Sig; window.AbortController = AC;
+  }
+
+  // NodeList.forEach (51), ChildNode.append/prepend/replaceWith (54)
+  if (typeof NodeList !== 'undefined' && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+  if (typeof HTMLCollection !== 'undefined' && !HTMLCollection.prototype.forEach) HTMLCollection.prototype.forEach = Array.prototype.forEach;
+  function toNodes(args) {
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < args.length; i++) frag.appendChild(args[i] instanceof Node ? args[i] : document.createTextNode(String(args[i])));
+    return frag;
+  }
+  [Element.prototype, Document.prototype, DocumentFragment.prototype].forEach(function (p) {
+    if (!p.append) p.append = function () { this.appendChild(toNodes(arguments)); };
+    if (!p.prepend) p.prepend = function () { this.insertBefore(toNodes(arguments), this.firstChild); };
+  });
+  [Element.prototype, CharacterData.prototype, DocumentType.prototype].forEach(function (p) {
+    if (!p.replaceWith) p.replaceWith = function () { if (this.parentNode) this.parentNode.replaceChild(toNodes(arguments), this); };
+    if (!p.remove) p.remove = function () { if (this.parentNode) this.parentNode.removeChild(this); };
+  });
+
+  // Object.getOwnPropertyDescriptors (54)
+  if (!Object.getOwnPropertyDescriptors) {
+    Object.getOwnPropertyDescriptors = function (o) {
+      var out = {}, keys = Object.getOwnPropertyNames(o).concat(Object.getOwnPropertySymbols ? Object.getOwnPropertySymbols(o) : []);
+      keys.forEach(function (k) { out[k] = Object.getOwnPropertyDescriptor(o, k); });
+      return out;
+    };
+  }
+
+  // Reflect (49)
+  if (typeof Reflect === 'undefined') {
+    window.Reflect = {
+      apply: function (f, t, a) { return Function.prototype.apply.call(f, t, a); },
+      construct: function (C, a, N) { var o = Object.create((N || C).prototype); var r = C.apply(o, a); return (r !== null && typeof r === 'object') ? r : o; },
+      get: function (o, k, r) { var d = Object.getOwnPropertyDescriptor(o, k); if (d && d.get) return d.get.call(r === undefined ? o : r); return o[k]; },
+      set: function (o, k, v, r) { try { o[k] = v; return true; } catch (e) { return false; } },
+      has: function (o, k) { return k in o; },
+      ownKeys: function (o) { return Object.getOwnPropertyNames(o).concat(Object.getOwnPropertySymbols ? Object.getOwnPropertySymbols(o) : []); },
+      defineProperty: function (o, k, d) { try { Object.defineProperty(o, k, d); return true; } catch (e) { return false; } },
+      deleteProperty: function (o, k) { try { return delete o[k]; } catch (e) { return false; } },
+      getPrototypeOf: function (o) { return Object.getPrototypeOf(o); },
+      setPrototypeOf: function (o, p) { try { Object.setPrototypeOf(o, p); return true; } catch (e) { return false; } },
+      getOwnPropertyDescriptor: function (o, k) { return Object.getOwnPropertyDescriptor(o, k); },
+      isExtensible: function (o) { return Object.isExtensible(o); },
+      preventExtensions: function (o) { Object.preventExtensions(o); return true; }
+    };
+  }
+
+  // String.prototype.matchAll (73), Array.prototype.findLast/findLastIndex (97)
+  if (!String.prototype.matchAll) {
+    String.prototype.matchAll = function (re) {
+      if (!(re instanceof RegExp)) re = new RegExp(re, 'g');
+      if (re.flags.indexOf('g') < 0) throw new TypeError('matchAll requires a global RegExp');
+      var r = new RegExp(re.source, re.flags), s = String(this), out = [], m;
+      while ((m = r.exec(s)) !== null) { out.push(m); if (m[0] === '') r.lastIndex++; }
+      return out[Symbol.iterator]();
+    };
+  }
+  if (!Array.prototype.findLast) {
+    Array.prototype.findLast = function (fn, t) { for (var i = this.length - 1; i >= 0; i--) if (fn.call(t, this[i], i, this)) return this[i]; return undefined; };
+    Array.prototype.findLastIndex = function (fn, t) { for (var i = this.length - 1; i >= 0; i--) if (fn.call(t, this[i], i, this)) return i; return -1; };
+  }
+  if (!String.prototype.trimStart) { String.prototype.trimStart = function () { return this.replace(/^\s+/, ''); }; String.prototype.trimEnd = function () { return this.replace(/\s+$/, ''); }; }
+  if (!Promise.allSettled) Promise.allSettled = function (ps) { return Promise.all(Array.from(ps).map(function (p) { return Promise.resolve(p).then(function (v) { return { status: 'fulfilled', value: v }; }, function (e) { return { status: 'rejected', reason: e }; }); })); };
+  if (typeof queueMicrotask === 'undefined') window.queueMicrotask = function (f) { Promise.resolve().then(f); };
+  if (typeof Symbol !== 'undefined' && !Symbol.asyncIterator) Symbol.asyncIterator = Symbol('Symbol.asyncIterator');
+
+  // KeyboardEvent.key (51): derive from keyCode for the keys a TV UI cares about
+  if (typeof KeyboardEvent !== 'undefined' && !('key' in KeyboardEvent.prototype)) {
+    var keyMap = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 27: 'Escape', 32: ' ', 37: 'ArrowLeft', 38: 'ArrowUp', 39: 'ArrowRight', 40: 'ArrowDown', 10009: 'Escape', 415: 'MediaPlay', 19: 'MediaPause', 10252: 'MediaPlayPause', 413: 'MediaStop', 417: 'MediaFastForward', 412: 'MediaRewind' };
+    Object.defineProperty(KeyboardEvent.prototype, 'key', {
+      get: function () { var c = this.keyCode || this.which; if (keyMap[c]) return keyMap[c]; if (c >= 48 && c <= 90) return String.fromCharCode(c).toLowerCase(); return 'Unidentified'; }
+    });
+  }
+})();
